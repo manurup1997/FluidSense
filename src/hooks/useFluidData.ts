@@ -12,15 +12,25 @@ export function useActivePatient() {
 }
 
 export function useFluidData(periodOverride?: SummaryPeriod) {
-  const [period, setPeriod] = useState<SummaryPeriod>(periodOverride ?? '24h');
+  const [period, setPeriod] = useState<SummaryPeriod>(periodOverride ?? 'monitoring_day');
   const [customRange, setCustomRange] = useState<{ start: Date; end: Date } | undefined>(undefined);
   const events = useStore((s) => s.events);
+  const monitoringPeriods = useStore((s) => s.monitoringPeriods);
   const patient = useActivePatient();
 
   // Recomputed each render (not memoized) so newly-added events — timestamped
   // after any earlier "now" snapshot — still fall inside the window.
   const now = new Date();
-  const range = useMemo(() => getPeriodRange(period, now, customRange), [period, customRange, events.length]);
+
+  const activePeriod = useMemo(
+    () => (patient ? monitoringPeriods.find((mp) => mp.profileId === patient.id && mp.status === 'active') ?? null : null),
+    [monitoringPeriods, patient]
+  );
+
+  const range = useMemo(
+    () => getPeriodRange(period, now, { custom: customRange, patient, activePeriod }),
+    [period, customRange, patient, activePeriod, events.length]
+  );
 
   const windowEvents = useMemo(
     () => (patient ? eventsInWindow(events, patient.id, range.start, range.end) : []),
@@ -35,5 +45,5 @@ export function useFluidData(periodOverride?: SummaryPeriod) {
 
   const lastEvent = windowEvents[0];
 
-  return { patient, period, setPeriod, customRange, setCustomRange, range, windowEvents, balance, reliability, lastEvent };
+  return { patient, period, setPeriod, customRange, setCustomRange, range, windowEvents, balance, reliability, lastEvent, activePeriod };
 }

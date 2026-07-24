@@ -3,10 +3,25 @@ import type { FluidEvent } from '../types';
 import { StatusBadge } from './ui/Badge';
 import { CATEGORY_ICON, CATEGORY_LABEL, INPUT_METHOD_LABEL, INPUT_METHOD_ICON } from '../lib/eventMeta';
 
-export function EventRow({ event, onEdit }: { event: FluidEvent; onEdit?: (e: FluidEvent) => void }) {
+export function EventRow({ event, onEdit, selectable, selected, onToggleSelect }: {
+  event: FluidEvent;
+  onEdit?: (e: FluidEvent) => void;
+  selectable?: boolean;
+  selected?: boolean;
+  onToggleSelect?: (id: string) => void;
+}) {
   const isIntake = event.direction === 'intake';
   return (
     <li className="flex items-start gap-3 py-3 border-b border-navy-900/5 last:border-0">
+      {selectable && (
+        <input
+          type="checkbox"
+          checked={!!selected}
+          onChange={() => onToggleSelect?.(event.id)}
+          aria-label={`Select entry: ${event.category}`}
+          className="mt-2 w-5 h-5 shrink-0"
+        />
+      )}
       <span
         className={`flex items-center justify-center w-10 h-10 rounded-full text-lg shrink-0 ${isIntake ? 'bg-intake-50' : 'bg-output-50'}`}
         aria-hidden="true"

@@ -4,12 +4,26 @@ import { v4 as uuid } from 'uuid';
 import type {
   AppUser, Mode, PatientProfile, FluidProfile, FluidEvent, WeightEvent, SymptomEvent,
   SavedContainer, EditRecord, Reminder, FluidAllowance, Role, AccessibilityPrefs,
+  MonitoringPeriod, MonitoringDayStartMode, OnboardingInput,
 } from '../types';
-import { patients as demoPatients, fluidProfiles as demoFluidProfiles, demoEvents, demoWeightEvents, PATIENT_HOME_ID } from '../lib/demoData';
+import { generateDemoData } from '../lib/demoData';
 
 // Persistence is intentionally routed only through this store (never direct
 // localStorage access from components) so a real backend such as Supabase can
-// later replace the `persist` middleware without touching the UI layer.
+// later replace the `persist` middleware without touching the UI layer — see
+// src/lib/supabase/ for the adapter this is designed to hand off to.
+
+export const DEMO_MODE_ENABLED = import.meta.env.VITE_ENABLE_DEMO_MODE !== 'false';
+
+interface LiveSnapshot {
+  patients: PatientProfile[];
+  fluidProfiles: FluidProfile[];
+  events: FluidEvent[];
+  weightEvents: WeightEvent[];
+  symptomEvents: SymptomEvent[];
+  monitoringPeriods: MonitoringPeriod[];
+  activePatientId: string;
+}
 
 interface StoreState {
   currentUser: AppUser;
@@ -20,22 +34,42 @@ interface StoreState {
   events: FluidEvent[];
   weightEvents: WeightEvent[];
   symptomEvents: SymptomEvent[];
+  monitoringPeriods: MonitoringPeriod[];
 
+  viewContext: 'live' | 'demo';
+  _liveCache: LiveSnapshot | null;
+
+  // --- onboarding / account lifecycle ---------------------------------------
+  completeOnboarding: (input: OnboardingInput) => void;
+  resetAccount: () => void;
+  deleteAllFluidData: () => void;
+
+  // --- demo mode --------------------------------------------------------------
+  enterDemoMode: () => void;
+  exitDemoMode: () => void;
+
+  // --- misc user/session --------------------------------------------------------
   setMode: (mode: Mode) => void;
   setActivePatient: (patientId: string) => void;
   setUserRole: (role: Role, displayName?: string) => void;
   setAccessibility: (changes: Partial<AccessibilityPrefs>) => void;
+  setSaveVoiceTranscripts: (save: boolean) => void;
 
+  // --- fluid events ------------------------------------------------------------
   addEvent: (e: Omit<FluidEvent, 'id' | 'recordedTime'> & { recordedTime?: string }) => FluidEvent;
   updateEvent: (id: string, changes: Partial<FluidEvent>, changedBy: string, reason?: string) => void;
   deleteEvent: (id: string, changedBy: string, reason?: string) => void;
+  deleteEvents: (ids: string[], changedBy: string, reason?: string) => void;
+  restoreEvent: (id: string) => void;
 
+  // --- fluid profiles & containers -----------------------------------------------
   addFluidProfile: (fp: Omit<FluidProfile, 'id'>) => FluidProfile;
   updateFluidProfile: (id: string, changes: Partial<FluidProfile>) => void;
   toggleFavouriteFluid: (patientId: string, fluidProfileId: string) => void;
-
   addContainer: (patientId: string, container: Omit<SavedContainer, 'id'>) => SavedContainer;
 
+  // --- patient profile ------------------------------------------------------------
+  addPatient: (displayName: string, careSetting: string) => PatientProfile;
   setAllowance: (patientId: string, allowance: FluidAllowance) => void;
   updatePatient: (patientId: string, changes: Partial<PatientProfile>) => void;
 
@@ -45,43 +79,186 @@ interface StoreState {
   addReminder: (patientId: string, reminder: Omit<Reminder, 'id'>) => void;
   updateReminder: (patientId: string, reminderId: string, changes: Partial<Reminder>) => void;
 
-  resetDemoData: () => void;
+  // --- monitoring periods / data management ----------------------------------------
+  startNewDay: (patientId: string) => MonitoringPeriod;
+  getActiveMonitoringPeriod: (patientId: string) => MonitoringPeriod | null;
+  setMonitoringDayStart: (patientId: string, mode: MonitoringDayStartMode, customHour?: number) => void;
+  clearTodayEntries: (patientId: string, changedBy: string, periodStart: Date, periodEnd: Date) => number;
 }
 
-const initialUser: AppUser = {
-  id: 'demo-user',
-  displayName: 'You',
+const defaultAccessibility: AccessibilityPrefs = { largeText: false, highContrast: false, reduceMotion: false };
+
+const emptyUser: AppUser = {
+  id: 'local-user',
+  displayName: '',
   role: 'patient',
   mode: 'patient',
-  accessibility: { largeText: false, highContrast: false, reduceMotion: false },
+  accessibility: defaultAccessibility,
+  onboardingCompleted: false,
+  timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+  saveVoiceTranscripts: true,
 };
+
+const emptyLiveSnapshot: LiveSnapshot = {
+  patients: [],
+  fluidProfiles: [],
+  events: [],
+  weightEvents: [],
+  symptomEvents: [],
+  monitoringPeriods: [],
+  activePatientId: '',
+};
+
+function newQuickButtons() {
+  return [
+    { id: uuid(), kind: 'intake' as const, category: 'water' as const, label: 'Water', order: 0, enabled: true },
+    { id: uuid(), kind: 'intake' as const, category: 'tea' as const, label: 'Tea', order: 1, enabled: true },
+    { id: uuid(), kind: 'intake' as const, category: 'coffee' as const, label: 'Coffee', order: 2, enabled: true },
+    { id: uuid(), kind: 'intake' as const, category: 'juice' as const, label: 'Juice', order: 3, enabled: true },
+    { id: uuid(), kind: 'intake' as const, category: 'other_intake' as const, label: 'Other intake', order: 4, enabled: true },
+    { id: uuid(), kind: 'output' as const, category: 'urine' as const, label: 'Measured urine', order: 5, enabled: true },
+    { id: uuid(), kind: 'output' as const, category: 'urine' as const, label: 'Unmeasured urine', order: 6, enabled: true },
+    { id: uuid(), kind: 'output' as const, category: 'continence' as const, label: 'Wet pad', order: 7, enabled: true },
+    { id: uuid(), kind: 'output' as const, category: 'vomit' as const, label: 'Vomiting', order: 8, enabled: true },
+    { id: uuid(), kind: 'output' as const, category: 'other_output' as const, label: 'Other output', order: 9, enabled: true },
+  ];
+}
 
 export const useStore = create<StoreState>()(
   persist(
     (set, get) => ({
-      currentUser: initialUser,
+      currentUser: emptyUser,
       mode: 'patient',
-      activePatientId: PATIENT_HOME_ID,
-      patients: demoPatients,
-      fluidProfiles: demoFluidProfiles,
-      events: demoEvents,
-      weightEvents: demoWeightEvents,
+      activePatientId: '',
+      patients: [],
+      fluidProfiles: [],
+      events: [],
+      weightEvents: [],
       symptomEvents: [],
+      monitoringPeriods: [],
+
+      viewContext: 'live',
+      _liveCache: null,
+
+      completeOnboarding: (input) => {
+        const now = new Date().toISOString();
+        const profileId = uuid();
+        const periodId = uuid();
+
+        const profile: PatientProfile = {
+          id: profileId,
+          displayName: input.accountMode === 'healthcare' ? 'New patient' : (input.displayName || 'Me'),
+          careSetting: input.accountMode === 'healthcare' ? (input.organisationName || 'Healthcare workspace') : 'Home monitoring',
+          monitoringDayStartMode: 'midnight',
+          units: input.units,
+          favouriteFluidIds: [],
+          containers: [],
+          quickButtons: newQuickButtons(),
+          dailyWeightEnabled: false,
+          reminders: [
+            { id: uuid(), kind: 'record_drink', enabled: false, intervalHours: 6 },
+            { id: uuid(), kind: 'record_output', enabled: false, intervalHours: 6 },
+            { id: uuid(), kind: 'daily_weight', enabled: false },
+            { id: uuid(), kind: 'evening_review', enabled: false },
+          ],
+          allowance: input.wantsAllowanceTracking && input.allowanceMl
+            ? { dailyMl: input.allowanceMl, setByName: input.displayName, setByRole: input.role, setAt: now }
+            : undefined,
+          activeMonitoringPeriodId: periodId,
+        };
+
+        const period: MonitoringPeriod = {
+          id: periodId,
+          profileId,
+          startTime: now,
+          endTime: null,
+          type: 'manual',
+          status: 'active',
+          createdBy: input.displayName,
+        };
+
+        set({
+          currentUser: {
+            id: uuid(),
+            displayName: input.displayName,
+            role: input.role,
+            mode: input.accountMode,
+            accessibility: defaultAccessibility,
+            onboardingCompleted: true,
+            timezone: input.timezone,
+            saveVoiceTranscripts: true,
+          },
+          mode: input.accountMode,
+          patients: [profile],
+          fluidProfiles: [],
+          events: [],
+          weightEvents: [],
+          symptomEvents: [],
+          monitoringPeriods: [period],
+          activePatientId: profileId,
+          viewContext: 'live',
+          _liveCache: null,
+        });
+      },
+
+      resetAccount: () => set({
+        currentUser: { ...emptyUser, id: uuid() },
+        mode: 'patient',
+        ...emptyLiveSnapshot,
+        viewContext: 'live',
+        _liveCache: null,
+      }),
+
+      deleteAllFluidData: () => set({
+        events: [],
+        weightEvents: [],
+        symptomEvents: [],
+      }),
+
+      enterDemoMode: () => {
+        if (!DEMO_MODE_ENABLED) return;
+        const s = get();
+        if (s.viewContext === 'demo') return;
+        const demo = generateDemoData(new Date());
+        set({
+          viewContext: 'demo',
+          _liveCache: {
+            patients: s.patients,
+            fluidProfiles: s.fluidProfiles,
+            events: s.events,
+            weightEvents: s.weightEvents,
+            symptomEvents: s.symptomEvents,
+            monitoringPeriods: s.monitoringPeriods,
+            activePatientId: s.activePatientId,
+          },
+          patients: demo.patients,
+          fluidProfiles: demo.fluidProfiles,
+          events: demo.events,
+          weightEvents: demo.weightEvents,
+          symptomEvents: [],
+          monitoringPeriods: demo.monitoringPeriods,
+          activePatientId: demo.patients[demo.patients.length - 1].id,
+          mode: 'patient',
+        });
+      },
+
+      exitDemoMode: () => {
+        const s = get();
+        if (s.viewContext !== 'demo') return;
+        const cache = s._liveCache ?? emptyLiveSnapshot;
+        set({
+          viewContext: 'live',
+          _liveCache: null,
+          ...cache,
+          mode: s.currentUser.mode,
+        });
+      },
 
       setMode: (mode) => {
         const state = get();
-        const nextPatient = mode === 'healthcare'
-          ? state.patients.find((p) => p.id !== PATIENT_HOME_ID)?.id ?? state.activePatientId
-          : PATIENT_HOME_ID;
         set({
           mode,
-          activePatientId: nextPatient,
-          currentUser: {
-            ...state.currentUser,
-            mode,
-            role: mode === 'healthcare' ? 'nurse' : 'patient',
-            displayName: mode === 'healthcare' ? 'Staff Nurse (You)' : 'You',
-          },
+          currentUser: { ...state.currentUser, mode },
         });
       },
 
@@ -93,6 +270,10 @@ export const useStore = create<StoreState>()(
 
       setAccessibility: (changes) => set((s) => ({
         currentUser: { ...s.currentUser, accessibility: { ...s.currentUser.accessibility, ...changes } },
+      })),
+
+      setSaveVoiceTranscripts: (save) => set((s) => ({
+        currentUser: { ...s.currentUser, saveVoiceTranscripts: save },
       })),
 
       addEvent: (e) => {
@@ -121,17 +302,28 @@ export const useStore = create<StoreState>()(
         }),
       })),
 
-      deleteEvent: (id, changedBy, reason) => set((s) => ({
-        events: s.events.map((ev) => ev.id === id
-          ? {
-            ...ev,
-            deleted: true,
-            edited: true,
-            editHistory: [...(ev.editHistory ?? []), {
-              time: new Date().toISOString(), field: 'deleted', originalValue: 'false', updatedValue: 'true', changedBy, reason,
-            }],
-          }
-          : ev),
+      deleteEvent: (id, changedBy, reason) => get().deleteEvents([id], changedBy, reason),
+
+      deleteEvents: (ids, changedBy, reason) => {
+        const idSet = new Set(ids);
+        const now = new Date().toISOString();
+        set((s) => ({
+          events: s.events.map((ev) => (idSet.has(ev.id)
+            ? {
+              ...ev,
+              deleted: true,
+              deletedAt: now,
+              edited: true,
+              editHistory: [...(ev.editHistory ?? []), {
+                time: now, field: 'deleted', originalValue: 'false', updatedValue: 'true', changedBy, reason,
+              }],
+            }
+            : ev)),
+        }));
+      },
+
+      restoreEvent: (id) => set((s) => ({
+        events: s.events.map((ev) => (ev.id === id ? { ...ev, deleted: false, deletedAt: undefined } : ev)),
       })),
 
       addFluidProfile: (fp) => {
@@ -165,6 +357,34 @@ export const useStore = create<StoreState>()(
         return c;
       },
 
+      addPatient: (displayName, careSetting) => {
+        const now = new Date().toISOString();
+        const profileId = uuid();
+        const periodId = uuid();
+        const profile: PatientProfile = {
+          id: profileId,
+          displayName,
+          careSetting,
+          monitoringDayStartMode: 'midnight',
+          units: get().currentUser.mode === 'healthcare' ? 'mL' : get().patients[0]?.units ?? 'mL',
+          favouriteFluidIds: [],
+          containers: [],
+          quickButtons: newQuickButtons(),
+          dailyWeightEnabled: false,
+          reminders: [],
+          activeMonitoringPeriodId: periodId,
+        };
+        const period: MonitoringPeriod = {
+          id: periodId, profileId, startTime: now, endTime: null, type: 'manual', status: 'active', createdBy: get().currentUser.displayName,
+        };
+        set((s) => ({
+          patients: [...s.patients, profile],
+          monitoringPeriods: [...s.monitoringPeriods, period],
+          activePatientId: profileId,
+        }));
+        return profile;
+      },
+
       setAllowance: (patientId, allowance) => set((s) => ({
         patients: s.patients.map((p) => (p.id === patientId ? { ...p, allowance } : p)),
       })),
@@ -187,14 +407,66 @@ export const useStore = create<StoreState>()(
         })),
       })),
 
-      resetDemoData: () => set({
-        patients: demoPatients,
-        fluidProfiles: demoFluidProfiles,
-        events: demoEvents,
-        weightEvents: demoWeightEvents,
-        symptomEvents: [],
-      }),
+      startNewDay: (patientId) => {
+        const now = new Date().toISOString();
+        const newPeriod: MonitoringPeriod = {
+          id: uuid(),
+          profileId: patientId,
+          startTime: now,
+          endTime: null,
+          type: 'manual',
+          status: 'active',
+          createdBy: get().currentUser.displayName,
+        };
+        set((s) => ({
+          monitoringPeriods: [
+            ...s.monitoringPeriods.map((mp) => (mp.profileId === patientId && mp.status === 'active' ? { ...mp, status: 'closed' as const, endTime: now } : mp)),
+            newPeriod,
+          ],
+          patients: s.patients.map((p) => (p.id === patientId ? { ...p, activeMonitoringPeriodId: newPeriod.id } : p)),
+        }));
+        return newPeriod;
+      },
+
+      getActiveMonitoringPeriod: (patientId) => {
+        const s = get();
+        return s.monitoringPeriods.find((mp) => mp.profileId === patientId && mp.status === 'active') ?? null;
+      },
+
+      setMonitoringDayStart: (patientId, mode, customHour) => set((s) => ({
+        patients: s.patients.map((p) => (p.id === patientId ? { ...p, monitoringDayStartMode: mode, monitoringDayCustomHour: customHour } : p)),
+      })),
+
+      clearTodayEntries: (patientId, changedBy, periodStart, periodEnd) => {
+        const s = get();
+        const toDelete = s.events.filter((e) => !e.deleted && e.patientId === patientId
+          && new Date(e.eventTime) >= periodStart && new Date(e.eventTime) <= periodEnd);
+        if (toDelete.length > 0) {
+          s.deleteEvents(toDelete.map((e) => e.id), changedBy, 'Cleared current monitoring day');
+        }
+        return toDelete.length;
+      },
     }),
-    { name: 'fluidsense-store-v1' }
+    {
+      name: 'fluidsense-store-v2',
+      partialize: (state) => {
+        const live = state.viewContext === 'demo' && state._liveCache
+          ? state._liveCache
+          : {
+            patients: state.patients,
+            fluidProfiles: state.fluidProfiles,
+            events: state.events,
+            weightEvents: state.weightEvents,
+            symptomEvents: state.symptomEvents,
+            monitoringPeriods: state.monitoringPeriods,
+            activePatientId: state.activePatientId,
+          };
+        return {
+          currentUser: state.currentUser,
+          mode: state.mode,
+          ...live,
+        };
+      },
+    }
   )
 );

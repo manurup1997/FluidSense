@@ -48,6 +48,12 @@ export function DrinksPage() {
 
       <Card className="p-5">
         <CardHeading action={<Button size="md" onClick={() => setShowNewDrink(true)}>Add drink</Button>}>Fluid profiles</CardHeading>
+        {fluidProfiles.length === 0 ? (
+          <div className="text-center py-4">
+            <p className="font-bold text-navy-900">No favourite drinks saved</p>
+            <p className="text-sm text-fog-600 mt-1">Teach FluidSense about a cup, mug, bottle or drink you use regularly.</p>
+          </div>
+        ) : (
         <ul className="space-y-3">
           {fluidProfiles.map((fp) => {
             const isFav = patient.favouriteFluidIds.includes(fp.id);
@@ -60,7 +66,7 @@ export function DrinksPage() {
                     <div className="flex items-center gap-2 flex-wrap">
                       <span aria-hidden="true">{CATEGORY_ICON[fp.category]}</span>
                       <span className="font-bold text-navy-900">{fp.name}</span>
-                      <Badge tone={fp.verified ? 'intake' : 'amber'}>{fp.verified ? 'Verified demo profile' : 'Personalised estimate'}</Badge>
+                      <Badge tone={fp.verified ? 'intake' : 'amber'}>{fp.verified ? 'Verified' : 'Personalised estimate'}</Badge>
                     </div>
                     {fp.brand && <p className="text-xs text-fog-500">{fp.brand}</p>}
                   </div>
@@ -86,6 +92,7 @@ export function DrinksPage() {
             );
           })}
         </ul>
+        )}
       </Card>
 
       {showNewContainer && <NewContainerModal onClose={() => setShowNewContainer(false)} onSave={(name, vol) => { addContainer(patient.id, { name, fullVolumeMl: vol }); setShowNewContainer(false); }} />}

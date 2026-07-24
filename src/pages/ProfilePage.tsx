@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { useStore } from '../store/useStore';
 import { useActivePatient } from '../hooks/useFluidData';
 import { Card, CardHeading } from '../components/ui/Card';
@@ -23,11 +24,15 @@ const REMINDER_LABELS: Record<string, string> = {
 };
 
 export function ProfilePage() {
+  const navigate = useNavigate();
   const patient = useActivePatient();
   const mode = useStore((s) => s.mode);
+  const viewContext = useStore((s) => s.viewContext);
+  const exitDemoMode = useStore((s) => s.exitDemoMode);
   const currentUser = useStore((s) => s.currentUser);
   const setUserRole = useStore((s) => s.setUserRole);
   const setAccessibility = useStore((s) => s.setAccessibility);
+  const setSaveVoiceTranscripts = useStore((s) => s.setSaveVoiceTranscripts);
   const updatePatient = useStore((s) => s.updatePatient);
   const setAllowance = useStore((s) => s.setAllowance);
   const updateReminder = useStore((s) => s.updateReminder);
@@ -40,8 +45,17 @@ export function ProfilePage() {
     <div className="max-w-lg mx-auto space-y-4 pb-8">
       <div>
         <h1 className="text-2xl font-extrabold text-navy-900">Profile</h1>
-        <p className="text-sm text-fog-600">Demo role selector — the prototype does not use real authentication.</p>
+        <p className="text-sm text-fog-600">
+          {viewContext === 'demo' ? 'Exploring demo mode — fictional data, changes here do not affect your real account.' : 'Manage your account, reminders and preferences.'}
+        </p>
       </div>
+
+      {viewContext === 'demo' && (
+        <Card className="p-5 border-2 border-amber-200 bg-amber-50">
+          <p className="text-sm font-semibold text-amber-800 mb-2">You're viewing demo mode.</p>
+          <Button size="md" onClick={() => { exitDemoMode(); navigate('/'); }}>Exit demo mode</Button>
+        </Card>
+      )}
 
       <Card className="p-5">
         <CardHeading>Your role</CardHeading>
@@ -57,6 +71,18 @@ export function ProfilePage() {
             </button>
           ))}
         </div>
+      </Card>
+
+      <Card className="p-5">
+        <CardHeading>Voice privacy</CardHeading>
+        <p className="text-sm text-fog-600 mb-3">
+          Audio is only used to create a transcript and is never permanently stored. You can choose whether the
+          text transcript itself is kept alongside a saved entry.
+        </p>
+        <label className="flex items-center gap-2 text-sm font-semibold text-navy-700">
+          <input type="checkbox" checked={currentUser.saveVoiceTranscripts} onChange={(e) => setSaveVoiceTranscripts(e.target.checked)} className="w-5 h-5" />
+          Save the transcript with voice-created entries
+        </label>
       </Card>
 
       <Card className="p-5">
@@ -80,7 +106,7 @@ export function ProfilePage() {
       <Card className="p-5">
         <CardHeading>Patient details</CardHeading>
         <label className="block text-sm font-semibold text-navy-700">
-          Display name (fictional)
+          Display name
           <input
             defaultValue={patient.displayName}
             onBlur={(e) => updatePatient(patient.id, { displayName: e.target.value })}
@@ -160,9 +186,20 @@ export function ProfilePage() {
         </Card>
       )}
 
+      <Card className="p-5">
+        <CardHeading>Data and monitoring settings</CardHeading>
+        <p className="text-sm text-fog-600 mb-3">Start a new day, clear entries, or permanently delete data.</p>
+        <Button variant="secondary" onClick={() => navigate('/settings/data')}>Open data settings</Button>
+      </Card>
+
       <Card className="p-5 bg-fog-100">
         <p className="text-sm text-fog-600">
-          FluidSense is a prototype. It stores demo data in this browser only and does not connect to real clinical systems.
+          FluidSense is a prototype. Your data is stored on this device and does not connect to real clinical systems.
+        </p>
+        <p className="text-xs text-fog-500 mt-2">
+          <Link to="/privacy" className="underline hover:no-underline">Privacy</Link>
+          {' · '}
+          <Link to="/terms" className="underline hover:no-underline">Terms</Link>
         </p>
       </Card>
     </div>

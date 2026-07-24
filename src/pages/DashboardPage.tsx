@@ -27,7 +27,12 @@ export function DashboardPage() {
   const events = useStore((s) => s.events);
   const weightEvents = useStore((s) => s.weightEvents);
   const setActivePatient = useStore((s) => s.setActivePatient);
+  const addPatient = useStore((s) => s.addPatient);
+  const viewContext = useStore((s) => s.viewContext);
   const [sortKey, setSortKey] = useState<SortKey>('reliability');
+  const [showAddPatient, setShowAddPatient] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [newSetting, setNewSetting] = useState('');
 
   const now = useMemo(() => new Date(), []);
   const range = useMemo(() => getPeriodRange('24h', now), [now]);
@@ -65,9 +70,12 @@ export function DashboardPage() {
 
   return (
     <div className="max-w-3xl mx-auto space-y-4 pb-8">
-      <div>
-        <h1 className="text-2xl font-extrabold text-navy-900">Patient dashboard</h1>
-        <p className="text-sm text-fog-600">Fictional demo patients · Last 24 hours</p>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-extrabold text-navy-900">Patient dashboard</h1>
+          <p className="text-sm text-fog-600">{viewContext === 'demo' ? 'Fictional demo patients' : 'Your patients'} · Last 24 hours</p>
+        </div>
+        {viewContext === 'live' && <Button size="md" onClick={() => setShowAddPatient(true)}>Add patient</Button>}
       </div>
 
       <label className="block text-sm font-semibold text-navy-700 max-w-xs">
@@ -104,6 +112,37 @@ export function DashboardPage() {
           </Card>
         ))}
       </div>
+
+      {showAddPatient && (
+        <div className="fixed inset-0 z-40 flex items-end md:items-center md:justify-center bg-navy-950/40" role="dialog" aria-modal="true" aria-label="Add patient">
+          <div className="bg-white w-full md:max-w-md md:rounded-3xl rounded-t-3xl p-5">
+            <h2 className="text-lg font-extrabold text-navy-900 mb-4">Add a patient</h2>
+            <label className="block text-sm font-semibold text-navy-700">
+              Display name
+              <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="e.g. Patient in Bed 4" className="mt-1 w-full rounded-xl border border-navy-900/15 px-3 py-2.5 font-normal" />
+            </label>
+            <label className="block text-sm font-semibold text-navy-700 mt-3">
+              Care setting
+              <input value={newSetting} onChange={(e) => setNewSetting(e.target.value)} placeholder="e.g. Ward 3B" className="mt-1 w-full rounded-xl border border-navy-900/15 px-3 py-2.5 font-normal" />
+            </label>
+            <div className="grid grid-cols-2 gap-3 mt-5">
+              <Button variant="secondary" onClick={() => setShowAddPatient(false)}>Cancel</Button>
+              <Button
+                disabled={!newName.trim()}
+                onClick={() => {
+                  addPatient(newName.trim(), newSetting.trim() || 'Not specified');
+                  setShowAddPatient(false);
+                  setNewName('');
+                  setNewSetting('');
+                  navigate('/');
+                }}
+              >
+                Add patient
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

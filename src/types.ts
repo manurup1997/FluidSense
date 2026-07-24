@@ -20,6 +20,9 @@ export interface AppUser {
   role: Role;
   mode: Mode;
   accessibility: AccessibilityPrefs;
+  onboardingCompleted: boolean;
+  timezone: string;
+  saveVoiceTranscripts: boolean;
 }
 
 // --- Measurement status -----------------------------------------------------
@@ -99,6 +102,9 @@ export interface FluidEvent {
   edited?: boolean;
   editHistory?: EditRecord[];
   deleted?: boolean;
+  deletedAt?: string;
+  monitoringPeriodId?: string;
+  confidence?: number;
 }
 
 export interface EditRecord {
@@ -144,6 +150,21 @@ export interface Reminder {
   snoozedUntil?: string;
 }
 
+// --- Monitoring periods ("Start new day") ---------------------------------------
+
+export type MonitoringDayStartMode = 'midnight' | 'custom_time' | 'on_demand';
+export type MonitoringPeriodType = 'calendar_day' | 'custom_shift' | 'rolling_24h' | 'manual';
+
+export interface MonitoringPeriod {
+  id: string;
+  profileId: string;
+  startTime: string; // ISO
+  endTime: string | null; // ISO, null while active
+  type: MonitoringPeriodType;
+  status: 'active' | 'closed';
+  createdBy: string;
+}
+
 // --- Patient profile -----------------------------------------------------------
 
 export interface FluidAllowance {
@@ -169,7 +190,9 @@ export interface PatientProfile {
   careSetting: string; // e.g. 'Home', 'Ward 4B', 'ICU'
   monitoringReason?: string;
   allowance?: FluidAllowance;
-  monitoringPeriod: 'rolling_24h' | 'shift' | 'since_midnight';
+  monitoringDayStartMode: MonitoringDayStartMode;
+  monitoringDayCustomHour?: number; // 0-23, used when monitoringDayStartMode === 'custom_time'
+  activeMonitoringPeriodId?: string;
   units: Units;
   favouriteFluidIds: string[];
   containers: SavedContainer[];
@@ -177,6 +200,7 @@ export interface PatientProfile {
   dailyWeightEnabled: boolean;
   reminders: Reminder[];
   contactInstructions?: string;
+  isDemo?: boolean;
 }
 
 // --- Reliability ---------------------------------------------------------------
@@ -211,4 +235,18 @@ export interface BalanceBreakdown {
   unmeasuredCount: number;
 }
 
-export type SummaryPeriod = 'shift' | '6h' | '12h' | '24h' | 'since_midnight' | 'custom';
+export type SummaryPeriod = 'monitoring_day' | 'shift' | '6h' | '12h' | '24h' | 'since_midnight' | 'previous_day' | 'custom';
+
+// --- Onboarding ---------------------------------------------------------------
+
+export interface OnboardingInput {
+  accountMode: Mode;
+  displayName: string;
+  role: Role;
+  units: Units;
+  timezone: string;
+  wantsAllowanceTracking?: boolean;
+  allowanceMl?: number;
+  organisationName?: string;
+  isTestWorkspace?: boolean;
+}
